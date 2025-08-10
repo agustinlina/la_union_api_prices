@@ -18,30 +18,28 @@ function leerStockExcel(nombreArchivo) {
     // Tomar valor crudo (v) o formateado (w)
     const precioRaw = cB ? (cB.v ?? cB.w ?? '') : '';
 
-    // ¿Está vacía la fila?
     const sinPrecio = precioRaw === null || precioRaw === undefined || String(precioRaw).trim() === '';
     if (!codigo && sinPrecio) break;
 
-    // Normalizar string y convertir a número
     let precio = null;
     if (!sinPrecio) {
-      let s = String(precioRaw)
-        .replace(/\s/g, '')               // quitar espacios
-        .replace(/[^0-9.,\-]/g, '');      // dejar solo dígitos y separadores
-
-      // Si hay . y , asumimos formato AR: . miles, , decimales
-      if (s.includes('.') && s.includes(',')) {
-        s = s.replace(/\./g, '').replace(',', '.');
+      if (typeof precioRaw === 'number') {
+        // Si Excel lo tiene como número, usarlo tal cual
+        precio = precioRaw;
       } else {
-        // Si hay muchos puntos, probablemente sean miles
-        const puntos = (s.match(/\./g) || []).length;
-        const comas = (s.match(/,/g) || []).length;
-        if (puntos > 1 && comas === 0) s = s.replace(/\./g, '');
-        if (comas > 1 && puntos === 0) s = s.replace(/,/g, ''); // caso raro
-      }
+        // Si es texto, limpiar $ y espacios pero NO tocar puntos
+        let s = String(precioRaw)
+          .replace(/\s/g, '')         // quitar espacios
+          .replace(/[^0-9.,\-]/g, ''); // quitar símbolos extraños
 
-      const n = Number(s);
-      if (!Number.isNaN(n)) precio = n;
+        // Si tiene coma como decimal, convertirla a punto
+        if (s.includes(',') && /\d,\d{1,2}$/.test(s)) {
+          s = s.replace(',', '.');
+        }
+
+        const n = Number(s);
+        if (!Number.isNaN(n)) precio = n;
+      }
     }
 
     productos.push({ codigo, precio });
