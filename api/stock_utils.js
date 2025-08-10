@@ -13,30 +13,39 @@ function leerStockExcel(nombreArchivo) {
     const cA = sheet['A' + fila];
     const cB = sheet['B' + fila];
 
-    const codigo = cA ? String(cA.v ?? cA.w ?? '').trim() : '';
-
-    // Tomar valor crudo (v) o formateado (w)
-    const precioRaw = cB ? (cB.v ?? cB.w ?? '') : '';
+    const codigo = cA ? String((cA.v ?? cA.w ?? '')).trim() : '';
+    const precioRaw = cB !== undefined ? (cB.v ?? cB.w ?? '') : '';
 
     const sinPrecio = precioRaw === null || precioRaw === undefined || String(precioRaw).trim() === '';
     if (!codigo && sinPrecio) break;
 
     let precio = null;
+
     if (!sinPrecio) {
       if (typeof precioRaw === 'number') {
-        // Si Excel lo tiene como número, usarlo tal cual
+        // Si Excel lo tiene como número real, usar tal cual (ya es 102800, por ejemplo).
         precio = precioRaw;
       } else {
-        // Si es texto, limpiar $ y espacios pero NO tocar puntos
+        // Texto: respetar miles con punto y decimales con coma (AR)
         let s = String(precioRaw)
-          .replace(/\s/g, '')         // quitar espacios
-          .replace(/[^0-9.,\-]/g, ''); // quitar símbolos extraños
+          .replace(/\s/g, '')           // quitar espacios
+          .replace(/[^0-9.,\-]/g, '');  // quitar símbolos (ej: $)
 
-        // Si tiene coma como decimal, convertirla a punto
-        if (s.includes(',') && /\d,\d{1,2}$/.test(s)) {
+        const hasDot = s.includes('.');
+        const hasComma = s.includes(',');
+
+        if (hasDot && hasComma) {
+          // Formato típico AR: 1.234.567,89 -> 1234567.89
+          s = s.replace(/\./g, '').replace(',', '.');
+        } else if (hasDot && !hasComma) {
+          // Solo puntos: tratarlos como separadores de miles -> quitar puntos
+          // 102.800 -> 102800 ; 1.234.567 -> 1234567
+          s = s.replace(/\./g, '');
+        } else if (!hasDot && hasComma) {
+          // Solo coma: asumir decimal -> cambiar a punto
+          // 102,80 -> 102.80
           s = s.replace(',', '.');
         }
-
         const n = Number(s);
         if (!Number.isNaN(n)) precio = n;
       }
