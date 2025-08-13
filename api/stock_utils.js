@@ -1,61 +1,91 @@
-const path = require('path'); 
-const XLSX = require('xlsx');
+const path = require('path')
+const XLSX = require('xlsx')
 
-function leerStockExcel(nombreArchivo) {
-  const ruta = path.join(__dirname, 'files', nombreArchivo);
-  const workbook = XLSX.readFile(ruta);
-  const sheet = workbook.Sheets[workbook.SheetNames[0]];
+// Parseo robusto: respeta miles y decimales locales
+function parsePrecioCell (cell) {
+  const val = cell ? cell.v ?? cell.w ?? '' : ''
+  if (typeof val === 'number') return val
 
-  let fila = 2; // A2/B2
-  const productos = [];
+  let s = String(val).trim()
+  if (!s) return null
 
-  while (true) {
-    const cA = sheet['A' + fila];
-    const cB = sheet['B' + fila];
+  // Quitar símbolos y espacios
+  s = s.replace(/\s/g, '').replace(/[^0-9.,\-]/g, '')
 
-    const codigo = cA ? String((cA.v ?? cA.w ?? '')).trim() : '';
-    const precioRaw = cB !== undefined ? (cB.v ?? cB.w ?? '') : '';
+  const hasDot = s.includes('.')
+  const hasComma = s.includes(',')
 
-    const sinPrecio = precioRaw === null || precioRaw === undefined || String(precioRaw).trim() === '';
-    if (!codigo && sinPrecio) break;
-
-    let precio = null;
-
-    if (!sinPrecio) {
-      if (typeof precioRaw === 'number') {
-        // Si Excel lo tiene como número real, usar tal cual (ya es 102800, por ejemplo).
-        precio = precioRaw;
-      } else {
-        // Texto: respetar miles con punto y decimales con coma (AR)
-        let s = String(precioRaw)
-          .replace(/\s/g, '')           // quitar espacios
-          .replace(/[^0-9.,\-]/g, '');  // quitar símbolos (ej: $)
-
-        const hasDot = s.includes('.');
-        const hasComma = s.includes(',');
-
-        if (hasDot && hasComma) {
-          // Formato típico AR: 1.234.567,89 -> 1234567.89
-          s = s.replace(/\./g, '').replace(',', '.');
-        } else if (hasDot && !hasComma) {
-          // Solo puntos: tratarlos como separadores de miles -> quitar puntos
-          // 102.800 -> 102800 ; 1.234.567 -> 1234567
-          s = s.replace(/\./g, '');
-        } else if (!hasDot && hasComma) {
-          // Solo coma: asumir decimal -> cambiar a punto
-          // 102,80 -> 102.80
-          s = s.replace(',', '.');
-        }
-        const n = Number(s);
-        if (!Number.isNaN(n)) precio = n;
-      }
-    }
-
-    productos.push({ codigo, precio });
-    fila++;
+  if (hasDot && hasComma) {
+    // 1.234.567,89 -> 1234567.89
+    s = s.replace(/\./g, '').replace(',', '.')
+  } else if (hasDot && !hasComma) {
+    // 102.800 -> 102800 (punto como miles)
+    s = s.replace(/\./g, '')
+  } else if (!hasDot && hasComma) {
+    // 102,80 -> 102.80
+    s = s.replace(',', '.')
   }
 
-  return productos;
+  const n = Number(s)
+  return Number.isNaN(n) ? null : n
 }
 
-module.exports = { leerStockExcel };
+function leerStockExcel (nombreArchivo) {
+  const ruta = path.join(__dirname, 'files', nombreArchivo)
+  const workbook = XLSX.readFile(ruta)
+  const sheet = workbook.Sheets[workbook.SheetNames[0]]
+
+  // Intentaremos detectar si el precio está en la misma fila (offset 0)
+  // o en la fila siguiente (offset 1). Tu nuevo archivo usa offset=1 (A1/B2).
+  let fila = 1 // ahora partimos en A1
+  let offset = null // se detecta la primera vez que haya datos
+  const productos = []
+  let vaciasSeguidas = 0
+
+  while (true) {
+    const cA = sheet['A' + fila]
+    const codigo = cA ? String(cA.v ?? cA.w ?? '').trim() : ''
+
+    // Detectar offset una sola vez cuando encontremos la primera fila útil
+    let precio = null
+    if (offset === null) {
+      // Mirar B[fila] y B[fila+1] para decidir
+      const pSame = parsePrecioCell(sheet['B' + fila])
+      const pNext = parsePrecioCell(sheet['B' + (fila + 1)])
+      if (pSame !== null) {
+        offset = 0 // formato A2/B2 (misma fila)
+        precio = pSame
+      } else if (pNext !== null) {
+        offset = 1 // formato A1/B2 (desfasado +1)
+        precio = pNext
+      } else {
+        // todavía no sabemos; seguimos avanzando
+        // precio se queda null por ahora
+      }
+    } else {
+      // Ya sabemos el offset: tomar B[fila + offset]
+      precio = parsePrecioCell(sheet['B' + (fila + offset)])
+    }
+
+    // Criterio de corte: si no hay código ni precio candidato varias filas seguidas, cortamos
+    if (!codigo && precio === null) {
+      vaciasSeguidas++
+      if (vaciasSeguidas >= 5) break // margen por espacios en blanco finales
+    } else {
+      vaciasSeguidas = 0
+    }
+
+    // Guardar fila válida (si hay código o precio)
+    if (codigo || precio !== null) {
+      productos.push({ codigo, precio })
+    }
+
+    fila++
+    // Seguridad: no iterar infinito (por si hubiera basura lejos)
+    if (fila > 100000) break
+  }
+
+  return productos
+}
+
+module.exports = { leerStockExcel }
