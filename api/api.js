@@ -46,8 +46,5 @@ function getPrices() {
 }
 
 module.exports = {
-  getStockOlav,
-  getStockCba,
-  getStockPolo,
   getPrices
 };
